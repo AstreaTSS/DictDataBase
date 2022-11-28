@@ -1,5 +1,4 @@
 import os
-import fn
 from . import config, utils, io_unsafe, locking
 
 

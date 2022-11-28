@@ -13,19 +13,21 @@ WORKERS = 10
 def writer():
     for _ in range(RUNS_PER_WORKER):
         with open("test.json", "r+b") as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
+            fcntl.lockf(f, fcntl.LOCK_EX)
             counter = json.loads(f.read())
             counter["counter"] += 1
             f.seek(0)
             f.write(json.dumps(counter).encode())
             f.truncate()
+            fcntl.lockf(f, fcntl.LOCK_UN)
 
 
 def reader():
     for _ in range(RUNS_PER_WORKER):
         with open("test.json", "r+") as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
+            fcntl.lockf(f, fcntl.LOCK_SH)
             counter = json.loads(f.read())
+            fcntl.lockf(f, fcntl.LOCK_UN)
 
 
 if __name__ == "__main__":
