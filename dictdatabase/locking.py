@@ -1,6 +1,7 @@
 from __future__ import annotations
 import threading
 import time
+import fcntl
 import os
 from . import config
 
@@ -16,9 +17,15 @@ LOCK_TIMEOUT = 30.0
 def os_touch(path: str):
 	"""
 		Like touch, but works on Windows.
+
+		Args:
+		- `path`: The file path to touch
+
 	"""
-	mode = 0o666
-	flags = os.O_CREAT | os.O_WRONLY | os.O_EXCL
+	mode = 0o666  # read and write for everyone but not execute
+	# os.O_EXCL: Error if the file already exists
+	# os.O_CREAT: Create the file if it doesn't exist
+	flags = os.O_CREAT | os.O_EXCL
 	fd = os.open(path, flags, mode)
 	os.close(fd)
 
@@ -100,7 +107,6 @@ class AbstractLock:
 		A subclass should implement _lock and call _init_lock_file in its __init__.
 	"""
 
-	__slots__ = ("db_name", "need_lock", "has_lock", "snapshot")
 
 	db_name: str
 	need_lock: LockFileMeta
@@ -108,6 +114,7 @@ class AbstractLock:
 	snapshot: FileLocksSnapshot
 
 	def __init__(self, db_name: str):
+		self.filepath = os.path.join(config.storage_directory, db_name)
 		self.db_name = db_name.replace("/", "___").replace(".", "____")
 
 	def _init_lockfiles(self, mode: str):
@@ -178,20 +185,6 @@ class WriteLock(AbstractLock):
 		self._init_lockfiles("write")
 
 	def _lock(self):
-		# Instantly signal that we need to write
-		os_touch(self.need_lock.path)
-		self.snapshot = FileLocksSnapshot(self.need_lock)
+		self.file_handle = open(self.filepath, "rb+")
 
-		# Except if current thread already has a write lock
-		if self.snapshot.exists(self.has_lock):
-			os.unlink(self.need_lock.path)
-			raise RuntimeError("Thread already has a write lock. Do try to obtain a write lock twice.")
-
-		# Iterate until this is the oldest need* lock and no has* locks exist
-		while True:
-			if not self.snapshot.any_has_locks and self.snapshot.oldest_need(self.need_lock):
-				os_touch(self.has_lock.path)
-				os.unlink(self.need_lock.path)
-				return
-			time.sleep(SLEEP_TIMEOUT)
-			self.snapshot = FileLocksSnapshot(self.need_lock)
+		fcntl.flock(f, fcntl.LOCK_EX)
